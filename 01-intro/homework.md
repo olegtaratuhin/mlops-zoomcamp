@@ -41,7 +41,7 @@ How many records did you drop?
 
 ## Q3. Missing values
 
-The features we'll user for our model are the pickup and dropoff location IDs. 
+The features we'll use for our model are the pickup and dropoff location IDs. 
 
 But they have a lot of missing values there. Let's replace them with "-1"
 
@@ -85,7 +85,7 @@ What's the RMSE on train?
 
 ## Q6. Evaluating the model
 
-Now let's apply this model to the validation dataset. 
+Now let's apply this model to the validation dataset (Feb 2021). 
 
 What's the RMSE on validation?
 
