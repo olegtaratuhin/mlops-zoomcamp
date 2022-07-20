@@ -15,24 +15,33 @@ from evidently.dashboard.tabs import DataDriftTab,RegressionPerformanceTab
 from evidently.model_profile import Profile
 from evidently.model_profile.sections import DataDriftProfileSection, RegressionPerformanceProfileSection
 
+MONGO_CLIENT_ADDRESS = "mongodb://localhost:27017/"
+MONGO_DATABASE = "prediction_service"
+PREDICTION_COLLECTION = "data"
+REPORT_COLLECTION = "report"
+REFERENCE_DATA_FILE = "../datasets/green_tripdata_2021-03.parquet" # Modify this for Q7
+TARGET_DATA_FILE = "target.csv"
+MODEL_FILE = os.getenv('MODEL_FILE', '../prediction_service/lin_reg.bin') # Modify this for Q7
 
 @task
 def upload_target(filename):
-    client = MongoClient("mongodb://localhost:27018/")
-    collection = client.get_database("prediction_service").get_collection("data")
+    client = MongoClient(MONGO_CLIENT_ADDRESS)
+    collection = client.get_database(MONGO_DATABASE).get_collection(PREDICTION_COLLECTION)
     with open(filename) as f_target:
         for line in f_target.readlines():
             row = line.split(",")
-            collection.update_one({"id": row[0]}, {"$set": {"target": float(row[1])}})
-    client.close()
+            collection.update_one({"id": row[0]},
+                                  {"$set": {"target": float(row[1])}}
+                                 )
+
 
 
 @task
 def load_reference_data(filename):
-    MODEL_FILE = os.getenv('MODEL_FILE', './prediction_service/lin_reg.bin')
+    
     with open(MODEL_FILE, 'rb') as f_in:
         dv, model = pickle.load(f_in)
-    reference_data = pq.read_table(filename).to_pandas()
+    reference_data = pq.read_table(filename).to_pandas().sample(n=5000,random_state=42) #Monitoring for 1st 5000 records
     # Create features
     reference_data['PU_DO'] = reference_data['PULocationID'].astype(str) + "_" + reference_data['DOLocationID'].astype(str)
 
@@ -48,16 +57,17 @@ def load_reference_data(filename):
 
 @task
 def fetch_data():
-    client = MongoClient("mongodb://localhost:27018/")
-    data = client.get_database("prediction_service").get_collection("data").find()
+    client = MongoClient(MONGO_CLIENT_ADDRESS)
+    data = client.get_database(MONGO_DATABASE).get_collection(PREDICTION_COLLECTION).find()
     df = pandas.DataFrame(list(data))
     return df
 
-
 @task
 def run_evidently(ref_data, data):
-    ref_data.drop('ehail_fee', axis=1, inplace=True)
+
+    ref_data.drop(['ehail_fee'], axis=1, inplace=True)
     data.drop('ehail_fee', axis=1, inplace=True)  # drop empty column (until Evidently will work with it properly)
+
     profile = Profile(sections=[DataDriftProfileSection(), RegressionPerformanceProfileSection()])
     mapping = ColumnMapping(prediction="prediction", numerical_features=['trip_distance'],
                             categorical_features=['PULocationID', 'DOLocationID'],
@@ -71,22 +81,20 @@ def run_evidently(ref_data, data):
 
 @task
 def save_report(result):
-    client = MongoClient("mongodb://localhost:27018/")
-    client.get_database("prediction_service").get_collection("report").insert_one(result[0])
-
+    pass
 
 @task
 def save_html_report(result):
-    result[1].save("evidently_report_example.html")
+    pass
 
 
 @flow
 def batch_analyze():
-    upload_target("target.csv")
-    ref_data = load_reference_data("./evidently_service/datasets/green_tripdata_2021-01.parquet")
-    data = fetch_data()
-    result = run_evidently(ref_data, data)
-    save_report(result)
-    save_html_report(result)
+    upload_target(TARGET_DATA_FILE)
+    ref_data = load_reference_data(REFERENCE_DATA_FILE).result()
+    data = fetch_data().result()
+    profile, dashboard = run_evidently(ref_data, data).result()
+    save_report(profile)
+    save_html_report(dashboard)
 
 batch_analyze()
